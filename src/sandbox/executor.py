@@ -34,15 +34,19 @@ class SandboxExecutor:
 
         return await self._run(cmd, timeout=timeout)
 
-    async def execute_in_directory(
+    async def execute_command(
         self,
-        directory: Path,
-        command: str,
+        args: list[str],
+        cwd: Path | None = None,
         timeout: int = 60,
     ) -> ExecutionResult:
-        """Run a shell command in the given directory."""
-        cmd = ["sh", "-c", command]
-        return await self._run(cmd, timeout=timeout, cwd=directory)
+        """Run a command as a list of arguments (no shell interpolation)."""
+        if cwd is not None:
+            resolved = cwd.resolve()
+            if not resolved.is_dir():
+                raise ValueError(f"Directory does not exist: {resolved}")
+
+        return await self._run(args, timeout=timeout, cwd=cwd)
 
     async def _run(
         self,
@@ -63,19 +67,21 @@ class SandboxExecutor:
 
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            exit_code = proc.returncode if proc.returncode is not None else 1
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
             timed_out = True
             stdout_bytes = b""
             stderr_bytes = b"Execution timed out"
+            exit_code = proc.returncode if proc.returncode is not None else -1
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
         return ExecutionResult(
             stdout=stdout_bytes.decode(errors="replace").strip(),
             stderr=stderr_bytes.decode(errors="replace").strip(),
-            exit_code=proc.returncode if proc.returncode is not None else -1,
+            exit_code=exit_code,
             timed_out=timed_out,
             duration_ms=duration_ms,
         )

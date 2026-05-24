@@ -14,7 +14,6 @@ class TestFailure:
     test_name: str
     error_message: str
     file_path: str
-    line_number: int
 
 
 @dataclass(frozen=True)
@@ -39,18 +38,21 @@ class PytestRunner:
         test_path: str = "tests/",
     ) -> TestResult:
         """Run pytest and parse the results."""
-        command = f"python3 -m pytest {test_path} --tb=short -q 2>&1 || true"
+        args = ["python3", "-m", "pytest", test_path, "--tb=short", "-q"]
 
-        exec_result = await self._executor.execute_in_directory(project_dir, command, timeout=120)
+        exec_result = await self._executor.execute_command(args, cwd=project_dir, timeout=120)
 
-        return self._parse_output(exec_result.stdout)
+        output = exec_result.stdout
+        if exec_result.stderr:
+            output = f"{output}\n{exec_result.stderr}"
+
+        return self._parse_output(output)
 
     def _parse_output(self, output: str) -> TestResult:
         """Parse pytest summary line to extract pass/fail counts."""
-        # Match patterns like "2 passed", "1 failed", "1 error"
         passed = self._extract_count(output, r"(\d+) passed")
         failed = self._extract_count(output, r"(\d+) failed")
-        errors = self._extract_count(output, r"(\d+) error")
+        errors = self._extract_count(output, r"(\d+) errors?")
         total = passed + failed + errors
 
         failures = self._extract_failures(output)
@@ -72,7 +74,6 @@ class PytestRunner:
     def _extract_failures(self, output: str) -> list[TestFailure]:
         """Extract failure details from pytest short traceback output."""
         failures: list[TestFailure] = []
-        # Match lines like "FAILED tests/test_foo.py::test_bar - AssertionError: ..."
         pattern = r"FAILED\s+(\S+?)::(\S+?)(?:\s+-\s+(.+))?$"
         for match in re.finditer(pattern, output, re.MULTILINE):
             failures.append(
@@ -80,7 +81,6 @@ class PytestRunner:
                     test_name=match.group(2),
                     error_message=match.group(3) or "",
                     file_path=match.group(1),
-                    line_number=0,
                 )
             )
         return failures

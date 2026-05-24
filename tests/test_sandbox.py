@@ -1,5 +1,7 @@
 """Tests for the sandbox executor and test runner."""
 
+import pytest
+
 from src.sandbox.executor import SandboxExecutor
 from src.sandbox.test_runner import PytestRunner
 
@@ -34,16 +36,25 @@ async def test_execute_timeout():
     assert result.exit_code != 0
 
 
-async def test_execute_in_directory(tmp_path):
-    """Commands run in the specified directory."""
+async def test_execute_command_in_directory(tmp_path):
+    """Commands run in the specified directory without shell interpolation."""
     script = tmp_path / "hello.py"
     script.write_text("print('from dir')\n")
 
     executor = SandboxExecutor()
-    result = await executor.execute_in_directory(tmp_path, "python3 hello.py")
+    result = await executor.execute_command(["python3", "hello.py"], cwd=tmp_path)
 
     assert result.stdout == "from dir"
     assert result.exit_code == 0
+
+
+async def test_execute_command_nonexistent_directory(tmp_path):
+    """Passing a nonexistent directory raises ValueError."""
+    executor = SandboxExecutor()
+    fake_dir = tmp_path / "nonexistent"
+
+    with pytest.raises(ValueError, match="does not exist"):
+        await executor.execute_command(["echo", "hi"], cwd=fake_dir)
 
 
 async def test_pytest_runner_passing_suite(tmp_path):
