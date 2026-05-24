@@ -16,3 +16,5 @@ htmlcov/
 output/
 node_modules/
 .tsbuildinfo
+seed_dashboard.py
+extra-instructions.md

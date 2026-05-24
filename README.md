@@ -4,6 +4,61 @@
 
 AgentFlow is an autonomous software development factory powered by a swarm of specialized AI agents. Unlike one-shot code generators, AgentFlow mirrors a real engineering org — it interviews you to refine requirements, architects the system, develops in parallel tracks, tests rigorously, and delivers deployable software. No GitHub dependency. No manual git workflows. Just spec in, software out.
 
+![AgentFlow Dashboard](docs/assets/dashboard.png)
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- An [Anthropic API key](https://console.anthropic.com/)
+
+### Install
+
+```bash
+git clone https://github.com/Vraj1234/AgentFlow.git
+cd AgentFlow
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### Run the Pipeline
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+agentflow new "Build a task management API with user auth and real-time notifications"
+```
+
+### Launch the Dashboard
+
+```bash
+agentflow dashboard
+# Open http://localhost:8000 in your browser
+```
+
+The dashboard shows real-time pipeline status, registered agents, the task graph, and knowledge base entries. It auto-refreshes every 3 seconds.
+
+### Run Tests
+
+```bash
+pytest tests/ -v                          # all 144 tests
+pytest --cov=src --cov-report=term-missing # with coverage
+```
+
+### Lint & Format
+
+```bash
+ruff check src/ tests/
+ruff format src/ tests/
+```
+
+### Docker
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+docker compose up
+```
+
 ## The Problem
 
 AI code generation today is either:
@@ -12,85 +67,139 @@ AI code generation today is either:
 
 Neither approach scales. Real software development requires *iteration*, *coordination*, and *quality gates* — things that current tools punt back to humans.
 
-## The Vision
+## How It Works
 
-AgentFlow replaces the entire software development lifecycle with an orchestrated agent swarm:
+```mermaid
+graph LR
+    A[Human Spec] --> B[Spec Analyst]
+    B --> C[Architect]
+    C --> D[Tech Lead]
+    D --> E1[Backend Dev]
+    D --> E2[Frontend Dev]
+    D --> E3[Infra Dev]
+    E1 --> F[QA Agent]
+    E2 --> F
+    E3 --> F
+    F -->|failures| E1
+    F -->|failures| E2
+    F --> G[Integration Agent]
+    G --> H[Delivered Software]
 
-```
-Human Spec → Interview & Refinement → Architecture → Parallel Development → Testing → Integration → Delivery
-     ↑              ↓                                        ↓                   ↓
-     └──── Feedback Loops ◄──────────────────────────────────┴───────────────────┘
+    style A fill:#6366f1,color:#fff
+    style H fill:#22c55e,color:#fff
 ```
 
 The human stays in the loop at decision points, not in the weeds of implementation.
 
 ## Agent Architecture
 
+```mermaid
+graph TB
+    subgraph Orchestration
+        MB[Message Bus]
+        KB[Knowledge Base]
+        TG[Task Graph]
+    end
+
+    subgraph Agents
+        SA[Spec Analyst]
+        AR[Architect]
+        TL[Tech Lead]
+        DB[Developer Backend]
+        DF[Developer Frontend]
+        DI[Developer Infra]
+        QA[QA Agent]
+        IA[Integration Agent]
+    end
+
+    subgraph Infrastructure
+        LLM[LLM Client]
+        VCS[Git Workspace]
+        SB[Sandbox Executor]
+    end
+
+    SA <--> MB
+    AR <--> MB
+    TL <--> MB
+    DB <--> MB
+    DF <--> MB
+    DI <--> MB
+    QA <--> MB
+    IA <--> MB
+
+    SA --> KB
+    AR --> KB
+    TL --> KB
+    TL --> TG
+
+    DB --> VCS
+    DF --> VCS
+    DI --> VCS
+    QA --> SB
+    IA --> VCS
+```
+
 ### 1. Spec Analyst Agent
-- Receives the initial human spec (plain English, bullet points, napkin sketch — whatever)
-- Conducts a **structured interview** with the human:
-  - Identifies ambiguities ("You said 'user auth' — do you need OAuth, magic links, or email/password?")
-  - Proposes tradeoffs ("Real-time updates need WebSockets, which adds infra complexity — worth it?")
-  - Surfaces missing requirements ("You didn't mention error handling for payments — what should happen on failure?")
-- Outputs a **formal spec document**: features, constraints, acceptance criteria, tech stack recommendation
+- Receives the initial human spec (plain English, bullet points — whatever)
+- Calls the LLM to identify ambiguities and generate clarifying questions
+- Produces a **StructuredSpec** (Pydantic-validated) with features, constraints, acceptance criteria, and tech stack
+- Stores the spec in the knowledge base for downstream agents
 
-### 2. Tech Lead Agent
-- The orchestrator. Reads the refined spec and creates a **work breakdown**:
-  - Decomposes features into independent tasks
-  - Identifies dependencies between tasks
-  - Assigns tasks to developer agents based on domain (backend, frontend, infra)
-  - Manages the execution schedule — parallelizes where possible, sequences where necessary
-- **Monitors progress**: detects when agents are stuck, re-plans dynamically, resolves conflicts between agents' outputs
-- Maintains a **project knowledge base** — shared context that all agents can read/write
+### 2. Architect Agent
+- Reads the spec from the knowledge base
+- Generates four structured artifacts via LLM:
+  - **Database schema** — tables, columns, relationships (with Literal-constrained types)
+  - **API contract** — endpoints with HTTP methods, request/response schemas
+  - **Component architecture** — modules with responsibilities and dependencies
+  - **Infrastructure blueprint** — services, container images, networking
+- All artifacts validated through Pydantic models with non-empty field constraints
 
-### 3. Architect Agent
-- Designs the system before any code is written:
-  - Database schema with entity relationships
-  - API contracts (endpoints, request/response shapes, auth requirements)
-  - Component architecture (frontend modules, backend services, shared libraries)
-  - Infrastructure blueprint (containerization, networking, environment config)
-- Outputs architecture as **structured artifacts** (not just docs) that other agents consume programmatically
+### 3. Tech Lead Agent
+- Decomposes the spec and architecture into parallelizable **tasks**
+- Populates the **TaskGraph** with dependency edges
+- Dispatches ready tasks to developer agents via the message bus
+- Handles task completion/failure messages and cascades status updates
 
-### 4. Developer Agents (multiple, parallelized)
-- Specialized by domain:
-  - **Backend Developer** — API implementation, business logic, database access
-  - **Frontend Developer** — UI components, state management, API integration
-  - **Infrastructure Developer** — Dockerfiles, CI config, deployment scripts, environment setup
-- Each agent works in its own **isolated workspace** (not git branches — a custom content-addressable store)
-- Agents can read each other's interfaces but can't modify each other's code
-- When conflicts arise (e.g., frontend expects a field the backend doesn't provide), the Tech Lead Agent mediates
+### 4. Developer Agents (3 specialties)
+A single `DeveloperAgent` class parameterized by specialty:
+- **Backend** — reads `api_contract` and `db_schema`, generates API/model code
+- **Frontend** — reads `component_architecture`, generates UI components
+- **Infrastructure** — reads `infra_blueprint`, generates Dockerfiles and CI config
+
+Each developer:
+- Works on an isolated git branch (`agent/developer_backend`, etc.)
+- Writes LLM-generated files with path traversal protection
+- Creates a git checkpoint after each generation
+- Restores the workspace branch in a `finally` block
 
 ### 5. QA Agent
-- Doesn't just write tests — it **validates behavior**:
-  - Generates unit tests from the spec's acceptance criteria
-  - Generates integration tests from the API contracts
-  - Runs all tests against the developer agents' code
-  - If tests fail, sends **specific failure reports** back to the responsible developer agent
-  - Developer agent fixes → QA re-runs → loop until green
-- Also performs:
-  - **Security scan** — checks for common vulnerabilities (injection, auth bypass, exposed secrets)
-  - **Performance baseline** — runs load tests and flags bottlenecks
+- Generates test files from the spec's acceptance criteria via LLM
+- Writes tests to the workspace and runs them via `PytestRunner`
+- Supports a retry loop (configurable `max_retries`)
+- Reports pass/fail results back through the message bus
 
 ### 6. Integration Agent
-- Once all agents' code passes QA individually:
-  - Merges all workspaces into a unified codebase using **semantic merging** (understands code intent, not just text diffs)
-  - Resolves integration conflicts (import paths, shared state, config alignment)
-  - Runs the full test suite against the integrated codebase
-  - Packages the final output: runnable application + documentation + deployment config
+- Uses `WorkspaceMerger` to combine all agent branches
+- Detects conflicts via `git merge --no-commit` probing
+- Runs the full test suite on the merged codebase
+- Writes integration results to the knowledge base
 
-## Git-Based Workspace Isolation
+## Pipeline Stages
 
-AgentFlow uses **git** under the hood, with a workspace isolation layer designed for AI agent workflows:
-
-- **Branch-per-agent** — each agent works on its own branch or worktree, with clear interface boundaries
-- **Semantic diff layer** — a presentation layer on top of git that summarizes logical changes ("added authentication middleware"), not just line-level diffs
-- **Parallel-first** — agents work concurrently on isolated branches, merged through structured integration
-- **Checkpoint & rollback** — git commits serve as checkpoints; any step can be rolled back without affecting others
-- **Audit trail** — full provenance via git history: which agent wrote which code, based on which spec requirement, approved by which gate
+```mermaid
+stateDiagram-v2
+    [*] --> SpecAnalysis
+    SpecAnalysis --> Architecture : spec approved
+    Architecture --> Development : architecture approved
+    Development --> QA : code generated
+    QA --> Development : tests failed
+    QA --> Integration : tests passed
+    Integration --> Delivered : all merged + tested
+    Integration --> QA : integration tests failed
+    Delivered --> [*]
+```
 
 ## Human-in-the-Loop Gates
-
-AgentFlow is autonomous but not unsupervised. Humans approve at key gates:
 
 | Gate | What happens | Human action |
 |------|-------------|--------------|
@@ -105,80 +214,16 @@ Between gates, agents work autonomously. Feedback at any gate propagates back th
 
 | Component | Technology |
 |-----------|-----------|
-| **Agent Framework** | Python + Anthropic Claude API (tool use, structured outputs) |
-| **Agent Orchestration** | Custom orchestrator (async task graph with dependency resolution) |
-| **Version Control** | Git with branch-per-agent isolation and semantic diff layer |
-| **Communication** | Agent message bus (in-process async queue) |
-| **Human Interface** | CLI (primary) + Web dashboard (real-time progress visualization) |
-| **Code Execution** | Docker sandboxes for running/testing generated code |
-| **Output Packaging** | Docker Compose bundle with generated README and deployment docs |
-
-## Example Workflow
-
-```
-$ agentflow new "I need a task management API with user auth, team workspaces,
-  and real-time notifications when tasks are assigned"
-
-🔍 Spec Analyst: I have a few questions to refine your requirements...
-
-  Q1: For user authentication, do you prefer:
-      (a) Email/password with JWT tokens
-      (b) OAuth2 with Google/GitHub
-      (c) Both
-  > c
-
-  Q2: Real-time notifications — should these be:
-      (a) In-app only (WebSocket)
-      (b) In-app + email
-      (c) In-app + email + Slack webhook
-  > a
-
-  Q3: What scale are you designing for?
-      (a) < 100 users (simple, fast to build)
-      (b) 100-10K users (need caching, connection pooling)
-      (c) 10K+ users (distributed architecture)
-  > b
-
-📋 Spec finalized. Review at: ./output/spec.md
-   [Approve / Edit / Regenerate]: approve
-
-🏗️  Architect designing system...
-📋 Architecture ready. Review at: ./output/architecture.md
-   [Approve / Edit / Regenerate]: approve
-
-⚡ Development starting — 3 agents working in parallel...
-   ├── Backend Developer:  ████████░░ 80% (12/15 endpoints)
-   ├── Frontend Developer: ██████░░░░ 60% (4/7 pages)
-   └── Infra Developer:    ██████████ 100% (Docker + CI ready)
-
-🧪 QA Agent running tests...
-   ├── Unit tests:        47/47 passing
-   ├── Integration tests: 12/12 passing
-   └── Security scan:     0 critical, 1 warning (logged)
-
-🔗 Integration Agent merging workspaces...
-   ├── Semantic merge:    clean
-   ├── Full test suite:   59/59 passing
-   └── Package:           ready
-
-✅ Delivered: ./output/task-manager/
-   ├── docker-compose.yml    (one command to run)
-   ├── README.md             (setup + API docs)
-   ├── src/backend/          (FastAPI + PostgreSQL)
-   ├── src/frontend/         (React + WebSocket)
-   └── tests/                (full coverage)
-```
-
-## What Makes This Different
-
-| Feature | Typical AI Code Gen | CrewAI-style Teams | AgentFlow |
-|---------|--------------------|--------------------|-----------|
-| Spec refinement | None — GIGO | Basic prompt → output | Interactive interview with tradeoff analysis |
-| Development model | One-shot generation | Linear pipeline (one agent at a time) | Parallel agents with shared context |
-| Conflict resolution | Manual (git merge) | Not addressed | Git-based isolation with structured integration |
-| Quality assurance | "Hope it works" | Tests generated but often not run | Closed-loop: test → fail → fix → retest |
-| Human oversight | Review everything | Review final output | Gate-based: approve milestones, not lines |
-| Iteration | Start over | Start over | Feedback propagates, agents revise |
+| **Agent Framework** | Python 3.11+ with async/await, Anthropic Claude API |
+| **LLM Integration** | `LLMClientProtocol` with retry/backoff, `MockLLMClient` for testing |
+| **Orchestration** | Custom TaskGraph with topological wave scheduling |
+| **Communication** | Async message bus (in-process pub/sub with history) |
+| **Shared State** | Append-only versioned KnowledgeBase with tag-based search |
+| **Version Control** | GitPython with branch-per-agent isolation and semantic diff |
+| **Code Execution** | Async subprocess sandbox with timeout + PytestRunner |
+| **CLI** | Typer with Rich terminal output |
+| **Web Dashboard** | FastAPI + WebSocket with security headers |
+| **Containerization** | Docker Compose with socket mounting for agent sandboxes |
 
 ## Project Structure
 
@@ -186,32 +231,70 @@ $ agentflow new "I need a task management API with user auth, team workspaces,
 AgentFlow/
 ├── src/
 │   ├── agents/
-│   │   ├── spec_analyst.py       # Interview & spec refinement
-│   │   ├── tech_lead.py          # Orchestration & task management
-│   │   ├── architect.py          # System design
-│   │   ├── developer.py          # Code generation (backend/frontend/infra)
-│   │   ├── qa.py                 # Testing & validation
-│   │   └── integrator.py         # Workspace merging & packaging
+│   │   ├── base.py              # Agent ABC, AgentRole, AgentMessage
+│   │   ├── spec_analyst.py      # Interview & spec refinement
+│   │   ├── architect.py         # Architecture artifact generation
+│   │   ├── tech_lead.py         # Task decomposition & orchestration
+│   │   ├── developer.py         # Code generation (backend/frontend/infra)
+│   │   ├── qa.py                # Test generation & validation
+│   │   └── integrator.py        # Workspace merging & packaging
 │   ├── orchestrator/
-│   │   ├── task_graph.py         # Dependency-aware task scheduler
-│   │   ├── message_bus.py        # Inter-agent communication
-│   │   └── knowledge_base.py     # Shared project context
+│   │   ├── task_graph.py        # Dependency-aware task scheduler
+│   │   ├── message_bus.py       # Inter-agent async pub/sub
+│   │   └── knowledge_base.py    # Versioned shared context store
+│   ├── llm/
+│   │   ├── client.py            # Anthropic SDK wrapper + LLMClientProtocol
+│   │   └── mock.py              # Deterministic mock for testing
 │   ├── vcs/
-│   │   ├── workspace.py          # Git-based isolated agent workspaces
-│   │   ├── branch_manager.py     # Branch-per-agent lifecycle
-│   │   ├── semantic_diff.py      # Intent-level diff presentation layer
-│   │   └── merger.py             # Structured integration & merge engine
+│   │   ├── workspace.py         # Git workspace operations
+│   │   ├── branch_manager.py    # Branch-per-agent lifecycle
+│   │   ├── semantic_diff.py     # Structural diff parsing
+│   │   └── merger.py            # Branch merging with conflict detection
 │   ├── sandbox/
-│   │   ├── executor.py           # Docker-based code execution
-│   │   └── test_runner.py        # Sandboxed test execution
+│   │   ├── executor.py          # Async subprocess execution
+│   │   └── test_runner.py       # Pytest wrapper with result parsing
 │   └── interface/
-│       ├── cli.py                # Command-line interface
-│       └── dashboard/            # Web-based progress dashboard
-├── tests/
-├── docker-compose.yml
+│       ├── cli.py               # Typer CLI (new, status, dashboard)
+│       ├── pipeline.py          # Pipeline stage orchestration
+│       └── dashboard/           # FastAPI web dashboard
+│           ├── app.py           # REST + WebSocket endpoints
+│           └── static/
+│               └── index.html   # Dark-themed dashboard UI
+├── tests/                       # 144 tests across 13 test files
 ├── pyproject.toml
+├── Dockerfile
+├── docker-compose.yml
 └── README.md
 ```
+
+## CLI Reference
+
+```bash
+# Start a new pipeline from a spec
+agentflow new "your specification text"
+
+# Check pipeline status
+agentflow status
+
+# Launch the web dashboard
+agentflow dashboard                        # http://localhost:8000
+agentflow dashboard --port 3000            # custom port
+agentflow dashboard --host 0.0.0.0         # expose on all interfaces
+
+# Version
+agentflow --version
+```
+
+## What Makes This Different
+
+| Feature | Typical AI Code Gen | CrewAI-style Teams | AgentFlow |
+|---------|--------------------|--------------------|-----------|
+| Spec refinement | None — GIGO | Basic prompt to output | Interactive interview with tradeoff analysis |
+| Development model | One-shot generation | Linear pipeline | Parallel agents with shared context |
+| Conflict resolution | Manual (git merge) | Not addressed | Git-based isolation with structured integration |
+| Quality assurance | "Hope it works" | Tests generated but often not run | Closed-loop: test, fail, fix, retest |
+| Human oversight | Review everything | Review final output | Gate-based: approve milestones, not lines |
+| Iteration | Start over | Start over | Feedback propagates, agents revise |
 
 ## License
 

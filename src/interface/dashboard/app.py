@@ -50,6 +50,7 @@ def create_app(
     message_bus: Any,
     knowledge_base: Any,
     task_graph: Any,
+    pipeline_status: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Create a FastAPI dashboard app wired to the given infrastructure."""
     app = FastAPI(title="AgentFlow Dashboard", version="0.1.0")
@@ -63,6 +64,8 @@ def create_app(
     @app.get("/api/status")
     async def get_status() -> dict[str, Any]:
         """Return current pipeline status."""
+        if pipeline_status:
+            return pipeline_status
         return {
             "current_stage": None,
             "completed_stages": [],
