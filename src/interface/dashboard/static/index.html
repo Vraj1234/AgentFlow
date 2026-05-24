@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentFlow Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e4e4e7;
+            --text-dim: #8b8d97;
+            --accent: #6366f1;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --red: #ef4444;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        header {
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        header h1 { font-size: 1.25rem; font-weight: 600; }
+        header .badge {
+            background: var(--accent);
+            color: white;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        main { padding: 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+        }
+        .card h2 {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        .status-idle { background: var(--text-dim); }
+        .status-running { background: var(--yellow); }
+        #status-text, #agents-list, #tasks-list, #kb-list {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.875rem;
+        }
+        .entry { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+        .entry:last-child { border-bottom: none; }
+        .empty { color: var(--text-dim); font-style: italic; }
+        .meta { color: var(--text-dim); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AgentFlow</h1>
+        <span class="badge">Dashboard</span>
+    </header>
+    <main>
+        <div class="card">
+            <h2>Pipeline Status</h2>
+            <div id="status-text">
+                <span class="status-indicator status-idle"></span>
+                Loading...
+            </div>
+        </div>
+        <div class="card">
+            <h2>Agents</h2>
+            <div id="agents-list"><span class="empty">Loading...</span></div>
+        </div>
+        <div class="card">
+            <h2>Task Graph</h2>
+            <div id="tasks-list"><span class="empty">Loading...</span></div>
+        </div>
+        <div class="card">
+            <h2>Knowledge Base</h2>
+            <div id="kb-list"><span class="empty">Loading...</span></div>
+        </div>
+    </main>
+    <script>
+        function esc(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function fetchJSON(url) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(url + ' returned HTTP ' + res.status);
+            return res.json();
+        }
+
+        async function refresh() {
+            try {
+                const status = await fetchJSON('/api/status');
+                const el = document.getElementById('status-text');
+                const stage = status.current_stage || 'Idle';
+                const cls = status.current_stage ? 'status-running' : 'status-idle';
+                el.innerHTML = '<span class="status-indicator ' + cls + '"></span>'
+                    + esc(stage) + ' (' + status.subscriber_count + ' subscribers)';
+            } catch(e) { console.error('Status fetch failed', e); }
+
+            try {
+                const agents = await fetchJSON('/api/agents');
+                const el = document.getElementById('agents-list');
+                if (agents.agents.length === 0) {
+                    el.innerHTML = '<span class="empty">No agents registered</span>';
+                } else {
+                    el.innerHTML = agents.agents.map(function(a) {
+                        return '<div class="entry">' + esc(a) + '</div>';
+                    }).join('');
+                }
+            } catch(e) { console.error('Agents fetch failed', e); }
+
+            try {
+                const tasks = await fetchJSON('/api/tasks');
+                const el = document.getElementById('tasks-list');
+                if (tasks.tasks.length === 0) {
+                    el.innerHTML = '<span class="empty">No tasks (' + tasks.total + ' total)</span>';
+                } else {
+                    el.innerHTML = tasks.tasks.map(function(t) {
+                        return '<div class="entry">' + esc(t.title)
+                            + ' <span class="meta">[' + esc(t.status) + '] '
+                            + esc(t.assigned_to) + '</span></div>';
+                    }).join('');
+                }
+            } catch(e) { console.error('Tasks fetch failed', e); }
+
+            try {
+                const kb = await fetchJSON('/api/knowledge');
+                const el = document.getElementById('kb-list');
+                if (kb.entries.length === 0) {
+                    el.innerHTML = '<span class="empty">No entries</span>';
+                } else {
+                    el.innerHTML = kb.entries.map(function(e) {
+                        return '<div class="entry">' + esc(e.key)
+                            + ' <span class="meta">by ' + esc(e.author)
+                            + ' [' + e.tags.map(esc).join(', ') + ']</span></div>';
+                    }).join('');
+                }
+            } catch(e) { console.error('KB fetch failed', e); }
+        }
+
+        refresh();
+        setInterval(refresh, 3000);
+    </script>
+</body>
+</html>

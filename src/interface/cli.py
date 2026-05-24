@@ -111,3 +111,23 @@ def status() -> None:
     invocation it will always report idle.
     """
     console.print("No active pipeline. Use [bold]agentflow new[/bold] to start one.")
+
+
+@app.command()
+def dashboard(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to serve on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+) -> None:
+    """Launch the web dashboard for real-time pipeline visualization."""
+    import uvicorn
+
+    from src.interface.dashboard.app import create_app
+    from src.orchestrator.task_graph import TaskGraph
+
+    bus = MessageBus()
+    kb = KnowledgeBase()
+    task_graph = TaskGraph()
+
+    dash_app = create_app(bus, kb, task_graph)
+    console.print(f"\n[bold]AgentFlow Dashboard[/bold] running at http://{host}:{port}\n")
+    uvicorn.run(dash_app, host=host, port=port, log_level="info")
