@@ -35,10 +35,18 @@ class PytestRunner:
     async def run_pytest(
         self,
         project_dir: Path,
-        test_path: str = "tests/",
+        test_path: str | list[str] = "tests/",
     ) -> TestResult:
-        """Run pytest and parse the results."""
-        args = ["python3", "-m", "pytest", test_path, "--tb=short", "-q"]
+        """Run pytest and parse the results.
+
+        ``test_path`` may be a single path string or a list of paths.
+        Each path becomes a separate argv entry to avoid shell-splitting issues.
+        """
+        if isinstance(test_path, str):
+            paths = [test_path]
+        else:
+            paths = list(test_path)
+        args = ["python3", "-m", "pytest", *paths, "--tb=short", "-q"]
 
         exec_result = await self._executor.execute_command(args, cwd=project_dir, timeout=120)
 
