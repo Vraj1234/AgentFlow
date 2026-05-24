@@ -248,3 +248,60 @@ async def test_raw_spec_length_limit(bus, kb):
     oversized = "x" * 50_001
     with pytest.raises(ValueError, match="exceeds maximum length"):
         await agent.analyze_spec(oversized)
+
+
+async def test_process_sends_error_reply_on_failure(bus, kb):
+    """process() sends spec_error reply when analyze_spec fails."""
+    mock = MockLLMClient()  # empty queue -> LLM call will raise
+    agent = SpecAnalystAgent(mock, bus, kb)
+    await agent.start()
+
+    received: list[AgentMessage] = []
+
+    async def capture(msg: AgentMessage) -> None:
+        received.append(msg)
+
+    await bus.subscribe("human", capture)
+
+    msg = AgentMessage(
+        sender="human",
+        recipient=agent.agent_id,
+        content={"raw_spec": "valid spec"},
+        message_type="spec_request",
+    )
+    await bus.publish(msg)
+
+    assert len(received) == 1
+    assert received[0].message_type == "spec_error"
+    assert "error" in received[0].content
+
+    await agent.stop()
+
+
+async def test_process_rejects_non_string_raw_spec(bus, kb):
+    """process() sends spec_error when raw_spec is not a string."""
+    mock = MockLLMClient()
+    agent = SpecAnalystAgent(mock, bus, kb)
+    await agent.start()
+
+    received: list[AgentMessage] = []
+
+    async def capture(msg: AgentMessage) -> None:
+        received.append(msg)
+
+    await bus.subscribe("human", capture)
+
+    msg = AgentMessage(
+        sender="human",
+        recipient=agent.agent_id,
+        content={"raw_spec": 12345},  # not a string
+        message_type="spec_request",
+    )
+    await bus.publish(msg)
+
+    assert len(received) == 1
+    assert received[0].message_type == "spec_error"
+    assert "string" in received[0].content["error"]
+    assert mock.call_count == 0  # no LLM call made
+
+    await agent.stop()

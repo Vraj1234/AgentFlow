@@ -87,7 +87,27 @@ class SpecAnalystAgent(Agent):
         """Handle incoming messages — runs spec analysis on spec_request."""
         if message.message_type == "spec_request":
             raw_spec = message.content.get("raw_spec", "")
-            questions = await self.analyze_spec(raw_spec)
+            if not isinstance(raw_spec, str):
+                logger.warning(
+                    "spec_request raw_spec is not a string, got %s",
+                    type(raw_spec).__name__,
+                )
+                await self.send(
+                    message.sender,
+                    {"error": "raw_spec must be a string"},
+                    message_type="spec_error",
+                )
+                return
+            try:
+                questions = await self.analyze_spec(raw_spec)
+            except Exception:
+                logger.exception("SpecAnalystAgent failed to analyze spec")
+                await self.send(
+                    message.sender,
+                    {"error": "spec analysis failed"},
+                    message_type="spec_error",
+                )
+                return
             questions_data = [
                 {
                     "id": q.id,
@@ -118,6 +138,8 @@ class SpecAnalystAgent(Agent):
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Entry point: analyze a raw spec and return questions."""
         raw_spec = task.get("raw_spec", "")
+        if not isinstance(raw_spec, str):
+            raise TypeError(f"raw_spec must be a string, got {type(raw_spec).__name__}")
         questions = await self.analyze_spec(raw_spec)
         questions_data = [
             {
