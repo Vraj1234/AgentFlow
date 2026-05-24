@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import anthropic
 
@@ -29,6 +29,31 @@ class LLMResponse:
     tool_calls: tuple[ToolCall, ...] = ()
     usage: Usage = field(default_factory=lambda: Usage(0, 0))
     model: str = ""
+
+
+@runtime_checkable
+class LLMClientProtocol(Protocol):
+    """Interface that both LLMClient and MockLLMClient satisfy."""
+
+    @property
+    def total_input_tokens(self) -> int: ...
+
+    @property
+    def total_output_tokens(self) -> int: ...
+
+    async def generate(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse: ...
+
+    async def generate_structured(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, str]],
+        response_schema: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
 
 class LLMClient:
@@ -123,7 +148,9 @@ class LLMClient:
                     delay = self._base_delay * (2**attempt)
                     await asyncio.sleep(delay)
 
-        raise last_error  # type: ignore[misc]
+        if last_error is None:
+            raise RuntimeError("max_retries must be >= 1")
+        raise last_error
 
     def _parse_response(self, response: anthropic.types.Message) -> LLMResponse:
         """Convert an Anthropic Message into our frozen LLMResponse."""
